@@ -3,6 +3,7 @@
 TEST_CASE="case 5 - remount"
 
 RES2=( 'file0 file1 file2' )
+filename="$((RANDOM)).txt"
 
 function check_umount () {
     _PARAM=$1
@@ -30,7 +31,7 @@ function create_and_except_remount () {
 }
 
 function create_and_except_bitmap () {
-    touch_and_check "${MNTPOINT}/hello"
+    touch_and_check "${MNTPOINT}/$filename"
 }
 
 function check_ls_remount () {
@@ -67,7 +68,7 @@ function check_bm() {
     _PARAM=$1
     _TEST_CASE=$2
     ROOT_PARENT_PATH=$(cd $(dirname $ROOT_PATH); pwd)
-    python3 "$ROOT_PATH"/checkbm/checkbm.py -l "$ROOT_PARENT_PATH"/include/fs.layout -r "$ROOT_PARENT_PATH"/tests/checkbm/golden.json > /dev/null
+    python3 "$ROOT_PATH"/checkbm/checkbm.py -l "$ROOT_PARENT_PATH"/include/fs.layout -r "$ROOT_PARENT_PATH"/tests/checkbm/golden.json -n "$filename" > /dev/null
     RET=$?
     if (( RET == ERR_OK )); then
         return 0
