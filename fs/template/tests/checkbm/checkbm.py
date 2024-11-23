@@ -1,5 +1,5 @@
 import argparse
-from distutils.log import error
+# from distutils.log import error
 from io import TextIOWrapper
 import os
 import sys
@@ -32,6 +32,7 @@ ddriver = home + "/ddriver"
 parser = argparse.ArgumentParser()
 parser.add_argument("-l", "--layout", help="absolute path of .layout file")
 parser.add_argument("-r", "--rules", help="absolute path of golden rule json file")
+parser.add_argument("-n", "--name", help="file name or directory name to check")
 args = parser.parse_args() 
 
 if args.layout == None:
@@ -43,6 +44,12 @@ if args.rules == None:
     golden = root + "/golden.json"
 else:
     golden = args.rules
+
+if args.name == None:
+    sys.stderr.write("未输入需检查的数据内容\n")
+    exit(-1)
+else:
+    name = args.name
 
 """ Does layout contain token """
 def check_layout(layout: str, tokens: List[str]):
@@ -201,7 +208,7 @@ with open(fslayout, "r") as f:
         print("\tinode_blks: %d" % inode_blks)
 
 
-def check_map(f: TextIOWrapper, map_ofs: int, map_blks: int, golden_cnt: int):
+def check_inodemap(f: TextIOWrapper, map_ofs: int, map_blks: int, golden_cnt: int):
     f.seek(map_ofs * block_size)
     bm = f.read(map_blks * block_size)
     valid_count = 0
@@ -210,32 +217,50 @@ def check_map(f: TextIOWrapper, map_ofs: int, map_blks: int, golden_cnt: int):
         valid_count += bin(val).count("1")
     return [ valid_count == golden_cnt, valid_count, golden_cnt]
 
-def check_data(f: TextIOWrapper, ino_ofs: int, ino_blks: int):
-    res = True
-    f.seek((ino_ofs + ino_blks) * block_size)
+def check_datamap(f: TextIOWrapper, map_ofs: int, map_blks: int, golden_cnt: int):
+    f.seek(map_ofs * block_size)
+    bm = f.read(map_blks * block_size)
+    position = []
+    valid_count = 0
+    for i in range(0, int(map_blks * block_size / 4)):
+        val = int.from_bytes(bm[i * 4 : i * 4 + 4], byteorder='little', signed=False)
+        bin_str = bin(val)[2:].zfill(32)
+        for b in range(len(bin_str)):
+            if bin_str[b] == '1':
+                valid_count += 1
+                position.append(i*32 + (31 - b))
+    return [ valid_count == golden_cnt, valid_count, golden_cnt, position]
+
+def check_data(f: TextIOWrapper, ino_ofs: int, ino_blks: int, position: list):
+    res = [False, False]
+    f.seek((ino_ofs + ino_blks + position[0]) * block_size)
     bm = f.read(1 * block_size)
     valid_count = 0
-    if all(byte == 0 for byte in bm):
-        res = False
-    else:
-        res = True
+    if not all(byte == 0 for byte in bm):
+        res[0] = True
+    if name in bm.decode('utf-8'):
+        res[1] = True
     return res
 
 with open(ddriver, "rb") as f:
     if is_check_inode_map:
-        res1 = check_map(f, inode_map_ofs, inode_map_blks, valid_inode)
+        res1 = check_inodemap(f, inode_map_ofs, inode_map_blks, valid_inode)
         if not res1[0]:
             sys.stderr.write("Inode位图错误, 期望值: %d个有效位, 实际值: %d个有效位" % (res1[2], res1[1]))
             exit(INODE_MAP_ERR)
     if is_check_data_map:
-        res2 = check_map(f, data_map_ofs, data_map_blks, valid_data)
+        res2 = check_datamap(f, data_map_ofs, data_map_blks, valid_data)
+        print(res2[3])
         if not res2[0]:
             sys.stderr.write("数据位图错误, 期望值: %d个有效位, 实际值: %d个有效位" % (res2[2], res2[1]))
             exit(DATA_MAP_ERR)
     if is_check_data:
-        res3 = check_data(f, inode_ofs, inode_blks)
-        if not res3:
+        res3 = check_data(f, inode_ofs, inode_blks, res2[3])
+        if not res3[0]:
             sys.stderr.write("数据写回错误, 没有写回到指定的数据区中")
+            exit(DATA_ERR)
+        if not res3[1]:
+            sys.stderr.write("数据写回错误, 找不到写入的数据内容")
             exit(DATA_ERR)
     exit(ERR_OK)
 
